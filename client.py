@@ -2,7 +2,7 @@ import requests
 import datetime
 from timeit import default_timer as timer
 
-SERVER_URL = "http://prayudahlah:8000/time"
+SERVER_URL = "http://prayudahlah:8001/time"
 
 
 def format_utc(dt):
