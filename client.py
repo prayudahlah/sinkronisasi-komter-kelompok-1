@@ -1,11 +1,11 @@
 import argparse
+import asyncio
 import json
 import signal
 import sys
 import time
-from urllib.request import Request, urlopen
 
-from network import start_server
+import websockets
 
 CLIENT_PORT = 5001
 
@@ -32,32 +32,73 @@ class SlaveClock:
         self.adjustment += value
 
 
-def handle_request(data):
-    command = data.get("command")
+async def run(server: str, port: int, drift: float):
+    clock = SlaveClock(drift_rate=drift)
+    uri = f"ws://{server}/ws/client"
 
-    if command == "get_time":
-        current_time = clock.get_time()
-        clock.history.append(current_time)
-        print(f"\n[REQUEST] Diminta waktu -> {format_time(current_time)}")
-        return {"time": current_time}
+    print("=" * 60)
+    print(" BERKELEY ALGORITHM - CLIENT NODE ".center(60, "="))
+    print("=" * 60)
+    print(f"  Server: {server}")
+    print(f"  Port: {port}")
+    print(f"  Drift rate: {drift:+.6f} detik/detik", end="")
+    if drift > 0:
+        print(" (jam LEBIH CEPAT)")
+    elif drift < 0:
+        print(" (jam LEBIH LAMBAT)")
+    else:
+        print(" (normal)")
+    print(f"  Waktu awal: {format_time(clock.get_time())}")
+    print("=" * 60)
 
-    elif command == "adjust":
-        value = data.get("value", 0)
-        before = clock.get_time()
-        clock.apply_adjustment(value)
-        after = clock.get_time()
-        print(f"\n[ADJUSTMENT] Diterima: {value:+.4f}")
-        print(f"  Waktu sebelum: {format_time(before)}")
-        print(f"  Waktu sesudah: {format_time(after)}")
-        print(f"  Total koreksi kumulatif: {clock.adjustment:+.4f}")
-        return {"status": "ok", "before": before, "after": after}
+    while True:
+        try:
+            async with websockets.connect(uri) as ws:
+                await ws.send(json.dumps({"action": "register", "port": port}))
+                print(f"\n  [REGISTER] Terdaftar di server {server}")
 
-    return {"error": "unknown command"}
+                async for msg in ws:
+                    data = json.loads(msg)
+                    command = data.get("command")
+
+                    if command == "get_time":
+                        t = clock.get_time()
+                        clock.history.append(t)
+                        print(f"\n[REQUEST] Diminta waktu -> {format_time(t)}")
+                        await ws.send(json.dumps({"time": t}))
+
+                    elif command == "adjust":
+                        value = data.get("value", 0)
+                        before = clock.get_time()
+                        clock.apply_adjustment(value)
+                        after = clock.get_time()
+                        print(f"\n[ADJUSTMENT] Diterima: {value:+.4f}")
+                        print(f"  Waktu sebelum: {format_time(before)}")
+                        print(f"  Waktu sesudah: {format_time(after)}")
+                        print(f"  Total koreksi kumulatif: {clock.adjustment:+.4f}")
+                        await ws.send(
+                            json.dumps(
+                                {
+                                    "status": "ok",
+                                    "before": before,
+                                    "after": after,
+                                }
+                            )
+                        )
+
+        except websockets.ConnectionClosed:
+            print("\n  [WS] Koneksi terputus, reconnect dalam 3 detik...")
+            await asyncio.sleep(3)
+        except (OSError, ConnectionError) as e:
+            print(f"\n  [WS] Gagal connect: {e}, coba lagi 3 detik...")
+            await asyncio.sleep(3)
+        except asyncio.CancelledError:
+            break
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Berkeley Algorithm - Client Node")
-    parser.add_argument("--server", help="Alamat server (host:port) untuk register")
+    parser.add_argument("--server", required=True, help="Alamat server (host:port)")
     parser.add_argument(
         "--drift", type=float, default=0.0, help="Drift rate (default: 0)"
     )
@@ -66,58 +107,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    CLIENT_PORT = args.port
-    clock = SlaveClock(drift_rate=args.drift)
-
-    print("=" * 60)
-    print(" BERKELEY ALGORITHM - CLIENT NODE ".center(60, "="))
-    print("=" * 60)
-    print(f"  Port: {CLIENT_PORT}")
-    print(f"  Drift rate: {args.drift:+.6f} detik/detik", end="")
-    if args.drift > 0:
-        print(" (jam LEBIH CEPAT)")
-    elif args.drift < 0:
-        print(" (jam LEBIH LAMBAT)")
-    else:
-        print(" (normal)")
-    if args.server:
-        print(f"  Server: {args.server}")
-    print(f"  Waktu awal: {format_time(clock.get_time())}")
-    print("=" * 60)
-
-    # Register ke server jika --server diberikan
-    if args.server:
-        data = json.dumps({"port": CLIENT_PORT}).encode()
-        req = Request(
-            f"http://{args.server}/api/register",
-            data=data,
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urlopen(req) as resp:
-                result = json.loads(resp.read())
-                if result.get("status") == "ok":
-                    print(f"  [REGISTER] Terdaftar di server {args.server}")
-        except Exception as e:
-            print(f"  [REGISTER] Gagal: {e}")
-
-    # Cleanup saat shutdown
-    def cleanup(sig, frame):
-        if args.server:
-            data = json.dumps({"port": CLIENT_PORT}).encode()
-            req = Request(
-                f"http://{args.server}/api/unregister",
-                data=data,
-                headers={"Content-Type": "application/json"},
-            )
-            try:
-                urlopen(req)
-                print(f"\n  [UNREGISTER] Dihapus dari server {args.server}")
-            except Exception:
-                pass
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, cleanup)
-    signal.signal(signal.SIGTERM, cleanup)
-
-    start_server(CLIENT_PORT, handle_request)
+    try:
+        asyncio.run(run(args.server, CLIENT_PORT, args.drift))
+    except KeyboardInterrupt:
+        pass

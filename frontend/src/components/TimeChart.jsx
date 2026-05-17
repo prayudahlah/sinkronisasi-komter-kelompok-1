@@ -14,7 +14,12 @@ export default function TimeChart({ state }) {
       time: info.time,
     }))
 
-  if (data.length === 0) return null
+  if (data.length === 0) return (
+    <div className="card">
+      <h3>Deviasi dari Rata-rata (Penyesuaian per Node)</h3>
+      <p className="muted" style={{ textAlign: 'center', padding: '60px 0' }}>Menunggu data iterasi pertama...</p>
+    </div>
+  )
 
   const MIN_RANGE = 0.5
   const maxAbs = Math.max(...data.map(d => Math.abs(d.deviation)), MIN_RANGE)

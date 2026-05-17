@@ -42,7 +42,12 @@ function stepAdjustments(entries, avg) {
 
 export default function CalculationDetail({ state }) {
   const calc = state?.calculation
-  if (!calc || !calc.time_values) return null
+  if (!calc || !calc.time_values) return (
+    <div className="card">
+      <h3>Detail Perhitungan</h3>
+      <p className="muted" style={{ textAlign: 'center', padding: '40px 0' }}>Menunggu iterasi pertama...</p>
+    </div>
+  )
 
   const { iteration, n, avg, time_values, adjustments } = calc
 

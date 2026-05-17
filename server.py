@@ -34,6 +34,8 @@ state = {
 }
 
 clients: set[WebSocket] = set()
+ws_slaves: dict[str, WebSocket] = {}
+ws_responses: dict[str, dict] = {}
 
 # ===================== BROADCAST =====================
 
@@ -49,6 +51,29 @@ async def broadcast():
         except Exception:
             dead.add(ws)
     clients.difference_update(dead)
+
+
+# ===================== HELPERS =====================
+
+
+async def send_to_slave(ip: str, port: int, command: dict, timeout: int = 5):
+    """Kirim command ke slave via WebSocket jika terhubung, fallback ke TCP."""
+    client_id = f"{ip}:{port}"
+    ws = ws_slaves.get(client_id)
+    if ws:
+        ws_responses.pop(client_id, None)
+        try:
+            await ws.send_text(json.dumps(command))
+            for _ in range(timeout * 10):
+                if client_id in ws_responses:
+                    return ws_responses.pop(client_id)
+                await asyncio.sleep(0.1)
+        except Exception:
+            pass
+        return {"error": "ws timeout"}
+    else:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, send_message, ip, port, command)
 
 
 # ===================== ALGORITMA BERKELEY =====================
@@ -72,11 +97,7 @@ async def berkeley_loop():
 
         tasks = []
         for ip, port in state["slaves"]:
-            tasks.append(
-                loop.run_in_executor(
-                    None, send_message, ip, port, {"command": "get_time"}
-                )
-            )
+            tasks.append(send_to_slave(ip, port, {"command": "get_time"}))
 
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -118,13 +139,7 @@ async def berkeley_loop():
                 continue
             ip, port = name.split(":")
             adj_tasks.append(
-                loop.run_in_executor(
-                    None,
-                    send_message,
-                    ip,
-                    int(port),
-                    {"command": "adjust", "value": adj},
-                )
+                send_to_slave(ip, int(port), {"command": "adjust", "value": adj})
             )
         if adj_tasks:
             await asyncio.gather(*adj_tasks, return_exceptions=True)
@@ -235,6 +250,38 @@ async def ws_endpoint(websocket: WebSocket):
         print(f"[WS ERROR] {type(e).__name__}: {e}")
     finally:
         clients.discard(websocket)
+
+
+@app.websocket("/ws/client")
+async def ws_client(websocket: WebSocket):
+    await websocket.accept()
+
+    try:
+        data = await websocket.receive_text()
+        msg = json.loads(data)
+        ip = websocket.client.host
+        port = msg.get("port", 5001)
+        client_id = f"{ip}:{port}"
+        ws_slaves[client_id] = websocket
+
+        if (ip, port) not in state["slaves"]:
+            state["slaves"].append((ip, port))
+            await broadcast()
+
+        print(f"[WS CLIENT] {client_id} terdaftar")
+
+        while True:
+            data = await websocket.receive_text()
+            ws_responses[client_id] = json.loads(data)
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"[WS CLIENT ERROR] {e}")
+    finally:
+        ws_slaves.pop(client_id, None)
+        ws_responses.pop(client_id, None)
+        print(f"[WS CLIENT] {client_id} terputus")
 
 
 # Serve frontend (React build)
