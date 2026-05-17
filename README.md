@@ -1,4 +1,4 @@
-# sinkronisasi-komter-kelompok-1
+# Tugas Sinkronisasi Komputasi Terdistribusi - Kelompok 1
 
 ## Setup
 
@@ -8,7 +8,7 @@ cd sinkronisasi-komter-kelompok-1
 uv sync
 ```
 
-## Menjalankan
+## Cara Menjalankan
 
 Server:
 ```bash
@@ -19,10 +19,3 @@ Client:
 ```bash
 uv run client.py --server prayudahlah:8000
 ```
-
-## Fitur Dashboard
-
-- Status koneksi & live node table
-- Bar chart deviasi waktu tiap node dari rata-rata
-- Riwayat adjustment per iterasi
-- Tombol Start/Stop sinkronisasi
