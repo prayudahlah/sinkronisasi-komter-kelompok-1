@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+import platform
+import subprocess
 import time
 
 from contextlib import asynccontextmanager
@@ -76,6 +78,38 @@ async def send_to_slave(ip: str, port: int, command: dict, timeout: int = 5):
         return await loop.run_in_executor(None, send_message, ip, port, command)
 
 
+# ===================== CLOCK UTILITIES =====================
+
+
+def adjust_host_clock(ts):
+    """Set sistem clock host ke timestamp yang diberikan."""
+    syst = platform.system()
+    try:
+        if syst == "Linux":
+            subprocess.run(["date", "-s", f"@{ts}"], check=True, capture_output=True)
+        elif syst == "Darwin":
+            subprocess.run(["date", "-s", f"@{ts}"], check=True, capture_output=True)
+        elif syst == "Windows":
+            dt = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(ts))
+            subprocess.run(
+                ["powershell", "Set-Date", f"'{dt}'"],
+                check=True,
+                capture_output=True,
+            )
+        print(f"[CLOCK] Waktu sistem diubah ke {ts} ({format_time(ts)})")
+        return True
+    except Exception as e:
+        msg = f"[CLOCK] Gagal mengubah waktu sistem: {e}"
+        print(msg)
+        return False
+
+
+def format_time(ts):
+    d = time.localtime(ts)
+    ms = int((ts % 1) * 1000)
+    return f"{d.tm_hour:02d}:{d.tm_min:02d}:{d.tm_sec:02d}.{ms:03d}"
+
+
 # ===================== ALGORITMA BERKELEY =====================
 
 
@@ -91,75 +125,89 @@ async def berkeley_loop():
         if not state["running"]:
             continue
 
-        # === FASE 1: Minta waktu dari semua slave ===
+        # === FASE 1: Kirim waktu master ke semua slave ===
         state["iteration"] += 1
         iteration = state["iteration"]
+        master_time = time.time()
 
         tasks = []
         for ip, port in state["slaves"]:
-            tasks.append(send_to_slave(ip, port, {"command": "get_time"}))
+            tasks.append(
+                send_to_slave(
+                    ip, port, {"command": "get_time", "master_time": master_time}
+                )
+            )
 
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-        times = {}
+        # === FASE 2: Kumpulkan offset dari client ===
+        offsets = {}
         for (ip, port), resp in zip(state["slaves"], responses):
             key = f"{ip}:{port}"
-            if isinstance(resp, dict) and "error" not in resp:
-                times[key] = resp["time"]
+            if isinstance(resp, dict) and "error" not in resp and "offset" in resp:
+                offsets[key] = resp["offset"]
             else:
-                times[key] = None
+                offsets[key] = None
 
-        # Tambahkan waktu master
-        master_time = time.time()
-        times["Master"] = master_time
+        # === FASE 3: Hitung rata-rata offset ===
+        valid_offsets = [o for o in offsets.values() if o is not None]
+        avg_offset = (
+            sum(valid_offsets) / len(valid_offsets) if valid_offsets else 0.0
+        )
 
-        # === FASE 2: Hitung rata-rata ===
-        valid = [t for t in times.values() if t is not None]
-        avg = sum(valid) / len(valid) if valid else master_time
-        state["average"] = avg
+        # === FASE 4: Universal time ===
+        universal_time = master_time + avg_offset
+        state["average"] = avg_offset
+        state["universal_time"] = universal_time
 
-        # === FASE 3: Hitung & kirim adjustment ===
-        adjustments = {}
-        for name, t in times.items():
-            if t is not None:
-                adjustments[name] = avg - t
+        # === FASE 5: Adjust host system clock ===
+        clock_adjusted = adjust_host_clock(universal_time)
 
-        state["calculation"] = {
-            "iteration": iteration,
-            "n": len(valid),
-            "avg": avg,
-            "time_values": {name: t for name, t in times.items()},
-            "adjustments": adjustments,
-        }
-
+        # === FASE 6: Kirim universal time ke semua slave ===
         adj_tasks = []
-
-        for name, adj in adjustments.items():
-            if name == "Master":
-                continue
-            ip, port = name.split(":")
-            adj_tasks.append(
-                send_to_slave(ip, int(port), {"command": "adjust", "value": adj})
-            )
+        for name, offset in offsets.items():
+            if offset is not None:
+                ip, port = name.split(":")
+                adj_tasks.append(
+                    send_to_slave(
+                        ip,
+                        int(port),
+                        {"command": "set_time", "universal_time": universal_time},
+                    )
+                )
         if adj_tasks:
             await asyncio.gather(*adj_tasks, return_exceptions=True)
 
         # === Update state ===
-        state["current"] = {
-            name: {
-                "time": t,
-                "adjustment": adjustments.get(name, 0),
-                "status": "online" if t is not None else "offline",
-            }
-            for name, t in times.items()
+        state["calculation"] = {
+            "iteration": iteration,
+            "n": len(valid_offsets),
+            "avg_offset": avg_offset,
+            "master_time": master_time,
+            "universal_time": universal_time,
+            "clock_adjusted": clock_adjusted,
+            "offsets": offsets.copy(),
         }
+
+        state["current"] = {}
+        state["current"]["Master"] = {
+            "time": master_time,
+            "offset": 0,
+            "status": "online",
+        }
+        for name, offset in offsets.items():
+            state["current"][name] = {
+                "time": master_time - offset if offset is not None else None,
+                "offset": offset if offset is not None else 0,
+                "status": "online" if offset is not None else "offline",
+            }
 
         state["history"].append(
             {
                 "iteration": iteration,
                 "data": {
-                    name: {"time": times[name], "adjustment": adjustments.get(name, 0)}
-                    for name in times
+                    name: {"offset": offsets[name]}
+                    for name in offsets
                 },
             }
         )

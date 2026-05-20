@@ -8,76 +8,70 @@ function formatTime(ts) {
   return `${hh}:${mm}:${ss}.${ms}`
 }
 
-function steps(entries, avg) {
-  const names = entries.map(([name]) => name === 'Master' ? 'Master' : name)
-  const vals = entries.map(([, t]) => t)
-
-  const lines = []
-
-  // Avg = (M + S1 + S2) / 3
-  lines.push(`Avg = (${names.join(' + ')}) / ${names.length}`)
-
-  // Avg = (1779011541.9385 + ...) / 3
-  lines.push(`Avg = (${vals.map(v => v.toFixed(4)).join(' + ')}) / ${names.length}`)
-
-  // Avg = sum / 3
-  const sum = vals.reduce((a, b) => a + b, 0)
-  lines.push(`Avg = ${sum.toFixed(4)} / ${names.length}`)
-
-  // Avg = result
-  lines.push(`Avg = ${avg.toFixed(4)}`)
-
-  return lines
-}
-
-function stepAdjustments(entries, avg) {
-  return entries
-    .filter(([, t]) => t != null)
-    .map(([name, t]) => {
-      const label = name === 'Master' ? 'Master' : name
-      const adj = avg - t
-      return `Adjustment(${label}) = ${avg.toFixed(4)} - ${t.toFixed(4)} = ${adj >= 0 ? '+' : ''}${adj.toFixed(4)}`
-    })
-}
-
 export default function CalculationDetail({ state }) {
   const calc = state?.calculation
-  if (!calc || !calc.time_values) return (
+  if (!calc || !calc.offsets) return (
     <div className="card">
       <h3>Detail Perhitungan</h3>
       <p className="muted" style={{ textAlign: 'center', padding: '40px 0' }}>Menunggu iterasi pertama...</p>
     </div>
   )
 
-  const { iteration, n, avg, time_values, adjustments } = calc
+  const { iteration, n, avg_offset, master_time, universal_time, clock_adjusted, offsets } = calc
 
-  const entries = Object.entries(time_values).filter(([, t]) => t != null)
-  const calcSteps = steps(entries, avg)
-  const adjSteps = stepAdjustments(entries, avg)
+  const entries = Object.entries(offsets).filter(([, v]) => v != null)
+
+  const sum = entries.reduce((a, [, v]) => a + v, 0)
 
   return (
     <div className="card">
       <h3>Detail Perhitungan — Iterasi #{iteration}</h3>
 
       <div className="calc-formula">
-        <code>Avg = (T₁ + T₂ + ... + T<sub>n</sub>) / n</code>
+        <code>Offset(i) = T<sub>master</sub> − T<sub>i</sub></code>
         <br />
-        <code>Adjustment(i) = Avg − T<sub>i</sub></code>
+        <code>Avg_Offset = Σ Offset(i) / n</code>
+        <br />
+        <code>Universal_Time = T<sub>master</sub> + Avg_Offset</code>
       </div>
 
       <div className="calc-steps">
         <div className="calc-steps-title">Langkah Perhitungan:</div>
-        {calcSteps.map((line, i) => (
-          <div key={i} className="calc-step mono">{line}</div>
+
+        {/* Per offset */}
+        {entries.map(([name, off], i) => (
+          <div key={i} className="calc-step mono">
+            Offset({name === 'master' ? 'Master' : name}) = {formatTime(master_time)} − T<sub>{name === 'master' ? 'm' : 'i'}</sub> = {off >= 0 ? '+' : ''}{off.toFixed(4)}
+          </div>
         ))}
+
         <div className="calc-steps-divider" />
-        {adjSteps.map((line, i) => (
-          <div key={i} className="calc-step mono">{line}</div>
-        ))}
+
+        {/* Avg Offset */}
+        <div className="calc-step mono">
+          Avg_Offset = ({entries.map(([, v]) => v.toFixed(4)).join(' + ')}) / {entries.length}
+        </div>
+        <div className="calc-step mono">
+          Avg_Offset = {sum.toFixed(4)} / {entries.length}
+        </div>
+        <div className="calc-step mono">
+          Avg_Offset = {avg_offset.toFixed(4)}
+        </div>
+
+        <div className="calc-steps-divider" />
+
+        {/* Universal Time */}
+        <div className="calc-step mono">
+          Universal_Time = {formatTime(master_time)} + ({avg_offset >= 0 ? '+' : ''}{avg_offset.toFixed(4)})
+        </div>
+        <div className="calc-step mono highlight">
+          Universal_Time = <strong>{formatTime(universal_time)}</strong>
+        </div>
       </div>
 
       <div className="calc-info">
-        Jumlah node: <strong>{n}</strong>
+        Jumlah node: <strong>{n}</strong> &nbsp;|&nbsp;
+        Clock adjusted: <strong className={clock_adjusted ? 'adj-pos' : 'adj-neg'}>{clock_adjusted ? 'Berhasil' : 'Gagal'}</strong>
       </div>
 
       <div className="table-wrap">
@@ -85,21 +79,21 @@ export default function CalculationDetail({ state }) {
           <thead>
             <tr>
               <th>Node</th>
-              <th>Waktu</th>
-              <th>Penyesuaian</th>
+              <th>Offset</th>
             </tr>
           </thead>
           <tbody>
-            {Object.entries(time_values).map(([name, t]) => (
+            <tr>
+              <td className="node-name">Master</td>
+              <td className="mono adj-pos">+0.0000</td>
+            </tr>
+            {entries.map(([name, off]) => (
               <tr key={name}>
-                <td className="node-name">{name === 'Master' ? 'Master' : name}</td>
-                <td className="mono">{t != null ? formatTime(t) : '-'}</td>
+                <td className="node-name">{name}</td>
                 <td className="mono">
-                  {t != null ? (
-                    <span className={adjustments[name] >= 0 ? 'adj-pos' : 'adj-neg'}>
-                      {adjustments[name] >= 0 ? '+' : ''}{adjustments[name].toFixed(4)}
-                    </span>
-                  ) : '-'}
+                  <span className={off >= 0 ? 'adj-pos' : 'adj-neg'}>
+                    {off >= 0 ? '+' : ''}{off.toFixed(4)}
+                  </span>
                 </td>
               </tr>
             ))}
@@ -108,7 +102,7 @@ export default function CalculationDetail({ state }) {
       </div>
 
       <div className="calc-result">
-        Rata-rata: <strong className="mono">{formatTime(avg)}</strong>
+        Universal Time: <strong className="mono">{formatTime(universal_time)}</strong>
       </div>
     </div>
   )

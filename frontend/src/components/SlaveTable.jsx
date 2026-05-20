@@ -23,7 +23,7 @@ export default function SlaveTable({ state }) {
               <th>Node</th>
               <th>Status</th>
               <th>Waktu</th>
-              <th>Penyesuaian</th>
+              <th>Selisih (Offset)</th>
             </tr>
           </thead>
           <tbody>
@@ -38,8 +38,8 @@ export default function SlaveTable({ state }) {
                 </td>
                 <td className="mono">{formatTime(info.time)}</td>
                 <td className="mono">
-                  <span className={info.adjustment >= 0 ? 'adj-pos' : 'adj-neg'}>
-                    {info.adjustment >= 0 ? '+' : ''}{info.adjustment?.toFixed(4)}
+                  <span className={info.offset >= 0 ? 'adj-pos' : 'adj-neg'}>
+                    {info.offset >= 0 ? '+' : ''}{info.offset?.toFixed(4)}
                   </span>
                 </td>
               </tr>

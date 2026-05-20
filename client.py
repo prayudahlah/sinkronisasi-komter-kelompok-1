@@ -28,8 +28,11 @@ class SlaveClock:
         drifted = elapsed * (1 + self.drift_rate)
         return self.start_real + drifted + self.adjustment
 
-    def apply_adjustment(self, value):
-        self.adjustment += value
+    def set_time(self, target_time):
+        now = time.time()
+        elapsed = now - self.start_real
+        drifted = elapsed * (1 + self.drift_rate)
+        self.adjustment = target_time - (self.start_real + drifted)
 
 
 async def run(server: str, port: int, drift: float):
@@ -62,20 +65,20 @@ async def run(server: str, port: int, drift: float):
                     command = data.get("command")
 
                     if command == "get_time":
+                        master_time = data.get("master_time", 0)
                         t = clock.get_time()
+                        offset = master_time - t
                         clock.history.append(t)
-                        print(f"\n[REQUEST] Diminta waktu -> {format_time(t)}")
-                        await ws.send(json.dumps({"time": t}))
+                        print(f"\n[REQUEST] Master: {format_time(master_time)} | Local: {format_time(t)} | Offset: {offset:+.4f}")
+                        await ws.send(json.dumps({"time": t, "offset": offset}))
 
-                    elif command == "adjust":
-                        value = data.get("value", 0)
+                    elif command == "set_time":
+                        universal_time = data.get("universal_time", 0)
                         before = clock.get_time()
-                        clock.apply_adjustment(value)
+                        clock.set_time(universal_time)
                         after = clock.get_time()
-                        print(f"\n[ADJUSTMENT] Diterima: {value:+.4f}")
-                        print(f"  Waktu sebelum: {format_time(before)}")
-                        print(f"  Waktu sesudah: {format_time(after)}")
-                        print(f"  Total koreksi kumulatif: {clock.adjustment:+.4f}")
+                        print(f"\n[SET TIME] Universal: {format_time(universal_time)}")
+                        print(f"  Sebelum: {format_time(before)} → Sesudah: {format_time(after)}")
                         await ws.send(
                             json.dumps(
                                 {

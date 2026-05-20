@@ -934,12 +934,14 @@ source = { virtual = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "requests" },
+    { name = "websockets" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.136.1" },
     { name = "requests", specifier = ">=2.33.1" },
+    { name = "websockets", specifier = ">=16.0" },
 ]
 
 [[package]]

@@ -7,27 +7,27 @@ export default function TimeChart({ state }) {
 
   const nodes = Object.entries(state.current)
   const data = nodes
-    .filter(([, info]) => info.time != null)
+    .filter(([, info]) => info.offset != null)
     .map(([name, info]) => ({
       name: name === 'Master' ? 'Master' : name,
-      deviation: info.adjustment,
+      offset: info.offset,
       time: info.time,
     }))
 
   if (data.length === 0) return (
     <div className="card">
-      <h3>Deviasi dari Rata-rata (Penyesuaian per Node)</h3>
+      <h3>Offset dari Master (Selisih per Node)</h3>
       <p className="muted" style={{ textAlign: 'center', padding: '60px 0' }}>Menunggu data iterasi pertama...</p>
     </div>
   )
 
   const MIN_RANGE = 0.5
-  const maxAbs = Math.max(...data.map(d => Math.abs(d.deviation)), MIN_RANGE)
+  const maxAbs = Math.max(...data.map(d => Math.abs(d.offset)), MIN_RANGE)
   const yDomain = [-maxAbs * 1.2, maxAbs * 1.2]
 
   return (
     <div className="card">
-      <h3>Deviasi dari Rata-rata (Penyesuaian per Node)</h3>
+      <h3>Offset dari Master (Selisih per Node)</h3>
       <ResponsiveContainer width="100%" height={300}>
         <BarChart data={data} margin={{ top: 10, right: 20, left: 20, bottom: 5 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -36,12 +36,12 @@ export default function TimeChart({ state }) {
           <Tooltip
             contentStyle={{ backgroundColor: '#ffffff', border: '1px solid #e5e7eb', borderRadius: 6 }}
             labelStyle={{ color: '#1f2937' }}
-            formatter={(val, name) => [val.toFixed(4), name === 'deviation' ? 'Penyesuaian' : name]}
+            formatter={(val, name) => [val.toFixed(4), name === 'offset' ? 'Offset' : name]}
           />
           <ReferenceLine y={0} stroke="#d1d5db" />
-          <Bar dataKey="deviation" name="Penyesuaian">
+          <Bar dataKey="offset" name="Offset">
             {data.map((entry, idx) => (
-              <Cell key={idx} fill={entry.deviation >= 0 ? '#22c55e' : '#ef4444'} />
+              <Cell key={idx} fill={entry.offset >= 0 ? '#22c55e' : '#ef4444'} />
             ))}
           </Bar>
         </BarChart>
